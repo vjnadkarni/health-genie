@@ -1,0 +1,8 @@
+╔══════════════════════════════════════════════════════════════╗
+║          Health Genie Development Environment Setup          ║
+╚══════════════════════════════════════════════════════════════╝
+This script will install and configure all required tools for
+Health Genie development. You'll have checkpoints to review
+progress and confirm before proceeding to each next step.
+Log file: /Users/vijay/venv/health-genie/installation_scripts/setup_logs/setup_20250910_232835.log
+🔍 DRY RUN MODE - No actual installations will be performed
