@@ -2,44 +2,111 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project: health-genie
+## Project: Health Genie
 
-This is a Python 3.13 project. The project uses a virtual environment located in the `venv/` directory.
+Health Genie is a Flutter-based iOS health monitoring application that collects biometric data from Apple Watch, calculates health scores, and provides AI-powered health insights.
+
+## Technology Stack
+
+### Mobile Application (Flutter)
+- **Framework**: Flutter (Dart)
+- **State Management**: Provider package
+- **HealthKit Integration**: health package (pub.dev)
+- **Local Database**: SQLite via sqflite package
+- **Testing**: Unit tests, widget tests, integration tests
+
+### Backend Services (Python)
+- **API Framework**: FastAPI
+- **AI Orchestration**: LangGraph (LangChain)
+- **LLM**: Claude Sonnet 3.5 (Anthropic)
+
+### Cloud Infrastructure
+- **Database**: Supabase (PostgreSQL)
+- **Sync Strategy**: WiFi-only manual sync with queue-based uploads
+
+## Project Structure
+
+```
+health-genie/
+├── flutter_app/           # Flutter mobile application
+│   ├── lib/
+│   │   ├── models/       # Data models
+│   │   ├── services/     # HealthKit, database, API services
+│   │   ├── providers/    # State management
+│   │   ├── screens/      # UI screens
+│   │   └── widgets/      # Reusable widgets
+│   └── test/             # Unit and widget tests
+├── backend/              # Python backend
+│   ├── api/             # FastAPI endpoints
+│   ├── langgraph/       # LangGraph workflows
+│   └── tests/           # Backend tests
+└── docs/                # Documentation
+```
 
 ## Development Setup
 
-### Virtual Environment
-The project uses a Python virtual environment. Always ensure you're working within the activated environment:
+### Flutter Development
 ```bash
-source venv/bin/activate  # On macOS/Linux
+# Install Flutter SDK
+# Set up iOS development environment (Xcode)
+cd flutter_app
+flutter pub get
+flutter run
 ```
 
-### Installing Dependencies
-When a requirements.txt file exists:
+### Python Backend
 ```bash
+source venv/bin/activate
+cd backend
 pip install -r requirements.txt
+uvicorn api.main:app --reload
 ```
 
-For development dependencies (when requirements-dev.txt exists):
-```bash
-pip install -r requirements-dev.txt
-```
+## Implementation Guidelines
 
-## Project Structure Guidelines
+### Data Collection
+- Collect biometrics only when app is in foreground (with specified exceptions)
+- Persist data from RAM to SQLite every 15 seconds
+- Maintain 24-hour circular buffer for local storage
+- Track unchanged values with special code (-1)
 
-Since this is a new project, follow these conventions when creating the structure:
+### Health Score Calculation
+- Categories: Cardiovascular, Sleep, Activity, Recovery, Stress
+- Hybrid approach: rule-based thresholds + AI analysis
+- Configurable time windows for trend analysis
 
-- Place main application code in a `health_genie/` or `src/` directory
-- Use snake_case for Python files and directories
-- Create a `tests/` directory for test files
-- Add configuration files (requirements.txt, setup.py, pyproject.toml) at the root level
+### Error Handling
+- Display notifications for:
+  - Apple Watch disconnection
+  - WiFi unavailability
+  - HealthKit permission denials
+
+### Testing Requirements
+- Write unit tests for all business logic
+- Create widget tests for UI components
+- Implement integration tests for data flows
+- Test on iPhone 12 and Apple Watch Series 7
+
+## Git Workflow
+
+- Default branch for development: `wip`
+- Production-ready code: `main`
+- Use descriptive commit messages
+- Regular syncs between Mac Mini and MacBook Pro
 
 ## Code Standards
 
+### Flutter/Dart
+- Follow Dart style guide
+- Use const constructors where possible
+- Implement proper error handling with try-catch
+- Add documentation comments for public APIs
+
+### Python
 - Follow PEP 8 style guidelines
-- Use type hints where appropriate
+- Use type hints
 - Create docstrings for modules, classes, and functions
-- Prefer pathlib.Path over os.path for file operations
+- Prefer pathlib.Path over os.path
 
 ## Important Reminders
 
@@ -47,3 +114,5 @@ Since this is a new project, follow these conventions when creating the structur
 - NEVER create files unless they're absolutely necessary for achieving the goal
 - ALWAYS prefer editing an existing file to creating a new one
 - NEVER proactively create documentation files (*.md) or README files unless explicitly requested
+- Test thoroughly before committing changes
+- Consider battery optimization for continuous monitoring
