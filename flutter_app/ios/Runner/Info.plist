@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Health Genie needs access to your health data to monitor your vital signs and provide personalized insights</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Health Genie needs permission to write health data to track your activities</string>
 </dict>
 </plist>

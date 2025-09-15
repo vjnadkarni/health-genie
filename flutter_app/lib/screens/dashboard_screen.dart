@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
@@ -30,11 +31,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic> _latestBiometrics = {};
   bool _isLoading = true;
   bool _isWatchConnected = false;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _initializeServices();
+    // Refresh UI every 15 seconds to show new data
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _loadLatestData();
+    });
   }
 
   Future<void> _initializeServices() async {
@@ -65,8 +71,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (biometrics.isNotEmpty) {
       _latestBiometrics = biometrics.first;
       
+      // Debug: Log the actual biometric values
+      debugPrint('Loaded biometrics: heart_rate=${_latestBiometrics['heart_rate']}, blood_oxygen=${_latestBiometrics['blood_oxygen']}');
+      
       // Calculate health scores
       _currentScores = _scoreService.calculateHealthScore(_latestBiometrics);
+      debugPrint('Calculated scores: overall=${_currentScores['overall']}');
     }
     
     if (mounted) {
@@ -461,6 +471,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _healthKit.stopDataCollection();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 }

@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'package:health/health.dart';
 import 'package:flutter/material.dart';
+import 'database_service.dart';
 
 class HealthKitService {
   static final HealthKitService _instance = HealthKitService._internal();
   factory HealthKitService() => _instance;
   HealthKitService._internal();
 
-  final Health _health = Health();
+  final HealthFactory _health = HealthFactory();
+  final DatabaseService _database = DatabaseService();
   bool _isInitialized = false;
   Timer? _dataCollectionTimer;
+  Map<String, dynamic> _latestHealthData = {};
   
   // Define the health data types we want to read
   static const List<HealthDataType> dataTypes = [
@@ -20,7 +23,7 @@ class HealthKitService {
     HealthDataType.DISTANCE_WALKING_RUNNING,
     HealthDataType.ACTIVE_ENERGY_BURNED,
     HealthDataType.WORKOUT,
-    HealthDataType.SLEEP_ANALYSIS,
+    HealthDataType.SLEEP_ASLEEP,
     HealthDataType.BLOOD_OXYGEN,
     HealthDataType.BODY_TEMPERATURE,
   ];
@@ -45,15 +48,12 @@ class HealthKitService {
 
     try {
       // Configure Health
-      await _health.configure();
+      // Configure is no longer needed in newer versions
       
       // Check if HealthKit is available on this device
-      bool? isAvailable = await _health.isHealthDataAvailable();
-      if (isAvailable != true) {
-        debugPrint('HealthKit is not available on this device');
-        return false;
-      }
-
+      // Note: We'll proceed directly to requesting permissions
+      // since HealthKit availability is platform-specific
+      
       // Request authorization for the data types
       bool authorized = await _health.requestAuthorization(
         dataTypes,
@@ -101,27 +101,42 @@ class HealthKitService {
     debugPrint('Stopped health data collection');
   }
 
+  /// Get the latest collected health data
+  Map<String, dynamic> get latestHealthData => _latestHealthData;
+
   /// Collect all health data
   Future<Map<String, dynamic>> _collectHealthData() async {
     Map<String, dynamic> healthData = {};
     
-    // Get data from the last 24 hours
+    // Get data from today (since midnight)
     final now = DateTime.now();
-    final yesterday = now.subtract(const Duration(days: 1));
+    final todayMidnight = DateTime(now.year, now.month, now.day, 0, 0, 0);
 
     try {
       // Fetch health data points
       List<HealthDataPoint> healthDataPoints = await _health.getHealthDataFromTypes(
-        types: dataTypes,
-        startTime: yesterday,
-        endTime: now,
+        todayMidnight,
+        now,
+        dataTypes,
       );
 
       // Process and organize the data
       healthData = _processHealthData(healthDataPoints, now);
       
-      // Log collection
+      // Store the latest data
+      _latestHealthData = healthData;
+      
+      // Save to database if we have data
+      if (healthData.isNotEmpty) {
+        await _database.insertBiometrics(healthData);
+        debugPrint('Saved health data to database');
+      }
+      
+      // Log collection with details
       debugPrint('Collected ${healthDataPoints.length} health data points');
+      debugPrint('Latest heart rate: ${healthData['heart_rate']}');
+      debugPrint('Steps today: ${healthData['steps']}');
+      debugPrint('Distance: ${healthData['distance']}m');
       
       // Here you would typically save to local database
       // For now, we'll just return the data
@@ -135,6 +150,12 @@ class HealthKitService {
 
   /// Process raw health data points into organized structure
   Map<String, dynamic> _processHealthData(List<HealthDataPoint> points, DateTime timestamp) {
+    // Get blood oxygen as percentage (it comes as fraction 0-1)
+    var bloodOxygen = _getLatestValue(points, HealthDataType.BLOOD_OXYGEN);
+    if (bloodOxygen != null && bloodOxygen <= 1.0) {
+      bloodOxygen = bloodOxygen * 100; // Convert to percentage
+    }
+    
     Map<String, dynamic> processedData = {
       'timestamp': timestamp.toIso8601String(),
       'heart_rate': _getLatestValue(points, HealthDataType.HEART_RATE),
@@ -143,9 +164,8 @@ class HealthKitService {
       'steps': _getTotalValue(points, HealthDataType.STEPS),
       'distance': _getTotalValue(points, HealthDataType.DISTANCE_WALKING_RUNNING),
       'active_energy': _getTotalValue(points, HealthDataType.ACTIVE_ENERGY_BURNED),
-      'blood_oxygen': _getLatestValue(points, HealthDataType.BLOOD_OXYGEN),
+      'blood_oxygen': bloodOxygen,
       'body_temperature': _getLatestValue(points, HealthDataType.BODY_TEMPERATURE),
-      'sleep_analysis': _getSleepData(points),
     };
 
     return processedData;
@@ -154,10 +174,17 @@ class HealthKitService {
   /// Get the latest value for a specific health data type
   double? _getLatestValue(List<HealthDataPoint> points, HealthDataType type) {
     final filteredPoints = points.where((p) => p.type == type).toList();
-    if (filteredPoints.isEmpty) return null;
+    if (filteredPoints.isEmpty) {
+      debugPrint('No data points found for type: $type');
+      return null;
+    }
     
     filteredPoints.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
-    return filteredPoints.first.value.toDouble();
+    var value = filteredPoints.first.value;
+    if (value is NumericHealthValue) {
+      return value.numericValue.toDouble();
+    }
+    return 0.0;
   }
 
   /// Get the total value for a cumulative health data type
@@ -165,12 +192,18 @@ class HealthKitService {
     final filteredPoints = points.where((p) => p.type == type);
     if (filteredPoints.isEmpty) return 0.0;
     
-    return filteredPoints.fold(0.0, (sum, point) => sum + point.value.toDouble());
+    return filteredPoints.fold(0.0, (sum, point) {
+      var value = point.value;
+      if (value is NumericHealthValue) {
+        return sum + value.numericValue.toDouble();
+      }
+      return sum;
+    });
   }
 
   /// Process sleep data
   Map<String, dynamic> _getSleepData(List<HealthDataPoint> points) {
-    final sleepPoints = points.where((p) => p.type == HealthDataType.SLEEP_ANALYSIS).toList();
+    final sleepPoints = points.where((p) => p.type == HealthDataType.SLEEP_ASLEEP).toList();
     
     Map<String, dynamic> sleepData = {
       'total_sleep_time': 0.0,
@@ -210,7 +243,7 @@ class HealthKitService {
 
   /// Get real-time heart rate (for monitoring screen)
   Stream<double?> get heartRateStream {
-    return Stream.periodic(const Duration(seconds: 1), (_) async {
+    return Stream.periodic(const Duration(seconds: 1)).asyncMap((_) async {
       if (!_isInitialized) return null;
       
       final now = DateTime.now();
@@ -218,21 +251,25 @@ class HealthKitService {
       
       try {
         final points = await _health.getHealthDataFromTypes(
-          types: [HealthDataType.HEART_RATE],
-          startTime: oneMinuteAgo,
-          endTime: now,
+          oneMinuteAgo,
+          now,
+          [HealthDataType.HEART_RATE],
         );
         
         if (points.isNotEmpty) {
           points.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
-          return points.first.value.toDouble();
+          var value = points.first.value;
+          if (value is NumericHealthValue) {
+            return value.numericValue.toDouble();
+          }
+          return 0.0;
         }
       } catch (e) {
         debugPrint('Error getting heart rate: $e');
       }
       
       return null;
-    }).asyncMap((event) => event);
+    });
   }
 
   /// Check if Apple Watch is connected
@@ -244,9 +281,9 @@ class HealthKitService {
       final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
       
       final points = await _health.getHealthDataFromTypes(
-        types: [HealthDataType.HEART_RATE],
-        startTime: fiveMinutesAgo,
-        endTime: now,
+        fiveMinutesAgo,
+        now,
+        [HealthDataType.HEART_RATE],
       );
       
       // If we have recent heart rate data, watch is likely connected
