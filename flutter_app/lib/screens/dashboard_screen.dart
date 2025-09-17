@@ -18,7 +18,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final HealthKitService _healthKit = HealthKitService();
   final DatabaseService _database = DatabaseService();
   final HealthScoreService _scoreService = HealthScoreService();
-  
+
   Map<String, double> _currentScores = {
     'overall': 0,
     'cardiovascular': 0,
@@ -27,18 +27,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     'recovery': 0,
     'stress': 0,
   };
-  
+
   Map<String, dynamic> _latestBiometrics = {};
   bool _isLoading = true;
   bool _isWatchConnected = false;
   Timer? _refreshTimer;
 
+  // Track current cardiovascular metric display
+  int _currentCardioMetric = 0; // 0: HR, 1: HR Range, 2: Resting HR, 3: HRV/Stress
+  final List<String> _cardioMetricNames = [
+    'Heart Rate',
+    'HR Range',
+    'Resting HR',
+    'HRV/Stress',
+  ];
+
+  // Track current blood oxygen metric display
+  int _currentSpO2Metric = 0; // 0: Current SpO2, 1: SpO2 Range
+
   @override
   void initState() {
     super.initState();
     _initializeServices();
-    // Refresh UI every 15 seconds to show new data
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    // Refresh UI every 5 minutes to show new data
+    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _loadLatestData();
     });
   }
@@ -248,7 +260,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           childAspectRatio: 1.5,
           children: [
             _buildCategoryCard('Cardiovascular', _currentScores['cardiovascular'] ?? 0, CupertinoIcons.heart_fill),
-            _buildCategoryCard('Sleep', _currentScores['sleep'] ?? 0, CupertinoIcons.moon_fill),
+            _buildCategoryCard('Blood Oxygen', _currentScores['sleep'] ?? 0, CupertinoIcons.drop_fill),
             _buildCategoryCard('Activity', _currentScores['activity'] ?? 0, CupertinoIcons.flame_fill),
             _buildCategoryCard('Recovery', _currentScores['recovery'] ?? 0, CupertinoIcons.battery_100),
             _buildCategoryCard('Stress', _currentScores['stress'] ?? 0, CupertinoIcons.waveform_path),
@@ -259,8 +271,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCategoryCard(String title, double score, IconData icon) {
+    // Special handling for Cardiovascular card
+    if (title == 'Cardiovascular') {
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _currentCardioMetric = (_currentCardioMetric + 1) % _cardioMetricNames.length;
+          });
+        },
+        child: _buildCardiovascularCard(),
+      );
+    }
+
+    // Special handling for Blood Oxygen card
+    if (title == 'Blood Oxygen') {
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _currentSpO2Metric = (_currentSpO2Metric + 1) % 2; // Toggle between 0 and 1
+          });
+        },
+        child: _buildBloodOxygenCard(),
+      );
+    }
+
+    // Default card for other categories
     final color = _scoreService.getScoreColor(score);
-    
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -288,6 +325,177 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildCardiovascularCard() {
+    String displayValue = '--';
+    String subtitle = _cardioMetricNames[_currentCardioMetric];
+    Color valueColor = CupertinoColors.label;
+    String? stressLevel;
+
+    switch (_currentCardioMetric) {
+      case 0: // Current Heart Rate
+        final hr = _latestBiometrics['heart_rate'];
+        if (hr != null) {
+          displayValue = '${hr.toStringAsFixed(0)} bpm';
+          valueColor = _getHeartRateColor(hr.toDouble());
+        }
+        break;
+
+      case 1: // HR Range
+        final minHr = _latestBiometrics['heart_rate_min'];
+        final maxHr = _latestBiometrics['heart_rate_max'];
+        if (minHr != null && maxHr != null) {
+          displayValue = '${minHr.toStringAsFixed(0)}-${maxHr.toStringAsFixed(0)}';
+        }
+        break;
+
+      case 2: // Resting Heart Rate (use session minimum)
+        final minHr = _latestBiometrics['heart_rate_min'];
+        if (minHr != null) {
+          displayValue = '${minHr.toStringAsFixed(0)} bpm';
+        }
+        break;
+
+      case 3: // HRV/Stress
+        final hrv = _latestBiometrics['heart_rate_variability'];
+        if (hrv != null) {
+          displayValue = '${hrv.toStringAsFixed(0)} ms';
+          valueColor = _getHRVColor(hrv.toDouble());
+          stressLevel = _getStressLevel(hrv.toDouble());
+        }
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(CupertinoIcons.heart_fill, color: valueColor, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            displayValue,
+            style: TextStyle(
+              fontSize: _currentCardioMetric == 1 ? 18 : 20,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
+          ),
+          if (stressLevel != null) ...[
+            Text(
+              stressLevel,
+              style: TextStyle(
+                fontSize: 11,
+                color: valueColor,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color _getHeartRateColor(double hr) {
+    if (hr >= 42 && hr <= 85) {
+      return CupertinoColors.systemGreen;
+    } else if (hr >= 86 && hr <= 140) {
+      return CupertinoColors.systemOrange;
+    } else {
+      return CupertinoColors.systemRed;
+    }
+  }
+
+  Color _getHRVColor(double hrv) {
+    if (hrv > 60) {
+      return CupertinoColors.systemGreen;
+    } else if (hrv >= 30 && hrv <= 60) {
+      return CupertinoColors.systemOrange;
+    } else {
+      return CupertinoColors.systemRed;
+    }
+  }
+
+  String _getStressLevel(double hrv) {
+    if (hrv > 60) {
+      return 'Low Stress';
+    } else if (hrv >= 30 && hrv <= 60) {
+      return 'Medium Stress';
+    } else {
+      return 'High Stress';
+    }
+  }
+
+  Widget _buildBloodOxygenCard() {
+    String displayValue = '--';
+    String subtitle = _currentSpO2Metric == 0 ? 'Blood Oxygen' : 'SpO2 Range';
+    Color valueColor = CupertinoColors.systemRed; // Default red for blood icon
+
+    switch (_currentSpO2Metric) {
+      case 0: // Current Blood Oxygen
+        final spO2 = _latestBiometrics['blood_oxygen'];
+        if (spO2 != null) {
+          displayValue = '${spO2.toStringAsFixed(0)}%';
+          valueColor = _getSpO2Color(spO2.toDouble());
+        }
+        break;
+
+      case 1: // SpO2 Range
+        final minSpO2 = _latestBiometrics['blood_oxygen_min'];
+        final maxSpO2 = _latestBiometrics['blood_oxygen_max'];
+        if (minSpO2 != null && maxSpO2 != null) {
+          displayValue = '${minSpO2.toStringAsFixed(0)}-${maxSpO2.toStringAsFixed(0)}%';
+        }
+        valueColor = CupertinoColors.systemRed; // Keep icon red for range
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(CupertinoIcons.drop_fill, color: CupertinoColors.systemRed, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            displayValue,
+            style: TextStyle(
+              fontSize: _currentSpO2Metric == 1 ? 16 : 20,
+              fontWeight: FontWeight.bold,
+              color: _currentSpO2Metric == 0 ? valueColor : CupertinoColors.label,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getSpO2Color(double spO2) {
+    if (spO2 >= 95) {
+      return CupertinoColors.systemGreen;
+    } else if (spO2 >= 91 && spO2 <= 94) {
+      return CupertinoColors.systemOrange;
+    } else {
+      return CupertinoColors.systemRed;
+    }
   }
 
   Widget _buildVitalsSection() {

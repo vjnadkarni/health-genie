@@ -12,7 +12,7 @@ class DatabaseService {
   
   // Database configuration
   static const String _databaseName = 'health_genie.db';
-  static const int _databaseVersion = 1;
+  static const int _databaseVersion = 3;
   
   // Table names
   static const String tableBiometrics = 'biometrics';
@@ -50,10 +50,14 @@ class DatabaseService {
         heart_rate REAL,
         heart_rate_variability REAL,
         resting_heart_rate REAL,
+        heart_rate_min REAL,
+        heart_rate_max REAL,
         steps REAL,
         distance REAL,
         active_energy REAL,
         blood_oxygen REAL,
+        blood_oxygen_min REAL,
+        blood_oxygen_max REAL,
         body_temperature REAL,
         sleep_total REAL,
         sleep_deep REAL,
@@ -107,6 +111,20 @@ class DatabaseService {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     // Handle database upgrades
     debugPrint('Upgrading database from v$oldVersion to v$newVersion');
+
+    if (oldVersion < 2) {
+      // Add new columns for heart rate min/max
+      await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN heart_rate_min REAL');
+      await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN heart_rate_max REAL');
+      debugPrint('Added heart_rate_min and heart_rate_max columns to biometrics table');
+    }
+
+    if (oldVersion < 3) {
+      // Add new columns for blood oxygen min/max
+      await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN blood_oxygen_min REAL');
+      await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN blood_oxygen_max REAL');
+      debugPrint('Added blood_oxygen_min and blood_oxygen_max columns to biometrics table');
+    }
   }
 
   /// Insert biometric data with circular buffer management

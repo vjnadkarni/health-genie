@@ -13,6 +13,15 @@ class HealthKitService {
   bool _isInitialized = false;
   Timer? _dataCollectionTimer;
   Map<String, dynamic> _latestHealthData = {};
+
+  // Track HR range since app started (not placeholders)
+  double? _sessionMinHr;
+  double? _sessionMaxHr;
+  DateTime? _sessionStartTime;
+
+  // Track Blood Oxygen range since app started
+  double? _sessionMinSpO2;
+  double? _sessionMaxSpO2;
   
   // Define the health data types we want to read
   static const List<HealthDataType> dataTypes = [
@@ -75,23 +84,30 @@ class HealthKitService {
   }
 
   /// Start collecting health data at regular intervals
-  void startDataCollection({Duration interval = const Duration(seconds: 15)}) {
+  void startDataCollection({Duration interval = const Duration(minutes: 5)}) {
     if (!_isInitialized) {
       debugPrint('HealthKit not initialized. Call initialize() first.');
       return;
     }
 
     stopDataCollection(); // Stop any existing timer
-    
+
+    // Initialize session tracking
+    _sessionStartTime = DateTime.now();
+    _sessionMinHr = null;
+    _sessionMaxHr = null;
+    _sessionMinSpO2 = null;
+    _sessionMaxSpO2 = null;
+
     // Collect data immediately
     _collectHealthData();
-    
+
     // Set up periodic collection
     _dataCollectionTimer = Timer.periodic(interval, (_) {
       _collectHealthData();
     });
-    
-    debugPrint('Started health data collection with ${interval.inSeconds}s interval');
+
+    debugPrint('Started health data collection with ${interval.inMinutes} minute interval');
   }
 
   /// Stop collecting health data
@@ -107,13 +123,13 @@ class HealthKitService {
   /// Collect all health data
   Future<Map<String, dynamic>> _collectHealthData() async {
     Map<String, dynamic> healthData = {};
-    
-    // Get data from today (since midnight)
+
+    // Get data from today for totals, but recent for real-time values
     final now = DateTime.now();
     final todayMidnight = DateTime(now.year, now.month, now.day, 0, 0, 0);
 
     try {
-      // Fetch health data points
+      // Fetch health data points from midnight for totals
       List<HealthDataPoint> healthDataPoints = await _health.getHealthDataFromTypes(
         types: dataTypes,
         startTime: todayMidnight,
@@ -155,16 +171,52 @@ class HealthKitService {
     if (bloodOxygen != null && bloodOxygen <= 1.0) {
       bloodOxygen = bloodOxygen * 100; // Convert to percentage
     }
-    
+
+    // Update session SpO2 range with actual measurements only
+    if (bloodOxygen != null && bloodOxygen >= 70 && bloodOxygen <= 100) {
+      if (_sessionMinSpO2 == null || bloodOxygen < _sessionMinSpO2!) {
+        _sessionMinSpO2 = bloodOxygen;
+      }
+      if (_sessionMaxSpO2 == null || bloodOxygen > _sessionMaxSpO2!) {
+        _sessionMaxSpO2 = bloodOxygen;
+      }
+    }
+
+    // Get current heart rate
+    final currentHr = _getLatestValue(points, HealthDataType.HEART_RATE);
+
+    // Update session HR range with actual measurements only
+    if (currentHr != null && currentHr >= 25 && currentHr <= 250) {
+      if (_sessionMinHr == null || currentHr < _sessionMinHr!) {
+        _sessionMinHr = currentHr;
+      }
+      if (_sessionMaxHr == null || currentHr > _sessionMaxHr!) {
+        _sessionMaxHr = currentHr;
+      }
+    }
+
+    // Get actual resting heart rate from HealthKit
+    final restingHr = _getLatestValue(points, HealthDataType.RESTING_HEART_RATE);
+
+    // Get HRV with debug logging
+    final hrv = _getLatestValue(points, HealthDataType.HEART_RATE_VARIABILITY_SDNN);
+    if (hrv != null) {
+      debugPrint('HRV measured: ${hrv.toStringAsFixed(1)} ms');
+    }
+
     Map<String, dynamic> processedData = {
       'timestamp': timestamp.toIso8601String(),
-      'heart_rate': _getLatestValue(points, HealthDataType.HEART_RATE),
-      'heart_rate_variability': _getLatestValue(points, HealthDataType.HEART_RATE_VARIABILITY_SDNN),
-      'resting_heart_rate': _getLatestValue(points, HealthDataType.RESTING_HEART_RATE),
+      'heart_rate': currentHr,
+      'heart_rate_variability': hrv,
+      'resting_heart_rate': restingHr,
+      'heart_rate_min': _sessionMinHr,
+      'heart_rate_max': _sessionMaxHr,
       'steps': _getTotalValue(points, HealthDataType.STEPS),
       'distance': _getTotalValue(points, HealthDataType.DISTANCE_WALKING_RUNNING),
       'active_energy': _getTotalValue(points, HealthDataType.ACTIVE_ENERGY_BURNED),
       'blood_oxygen': bloodOxygen,
+      'blood_oxygen_min': _sessionMinSpO2,
+      'blood_oxygen_max': _sessionMaxSpO2,
       'body_temperature': _getLatestValue(points, HealthDataType.BODY_TEMPERATURE),
     };
 
@@ -191,7 +243,7 @@ class HealthKitService {
   double _getTotalValue(List<HealthDataPoint> points, HealthDataType type) {
     final filteredPoints = points.where((p) => p.type == type);
     if (filteredPoints.isEmpty) return 0.0;
-    
+
     return filteredPoints.fold(0.0, (sum, point) {
       var value = point.value;
       if (value is NumericHealthValue) {
@@ -200,6 +252,7 @@ class HealthKitService {
       return sum;
     });
   }
+
 
   /// Process sleep data
   Map<String, dynamic> _getSleepData(List<HealthDataPoint> points) {
