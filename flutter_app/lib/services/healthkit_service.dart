@@ -8,7 +8,7 @@ class HealthKitService {
   factory HealthKitService() => _instance;
   HealthKitService._internal();
 
-  final HealthFactory _health = HealthFactory();
+  final Health _health = Health();
   final DatabaseService _database = DatabaseService();
   bool _isInitialized = false;
   Timer? _dataCollectionTimer;
@@ -115,9 +115,9 @@ class HealthKitService {
     try {
       // Fetch health data points
       List<HealthDataPoint> healthDataPoints = await _health.getHealthDataFromTypes(
-        todayMidnight,
-        now,
-        dataTypes,
+        types: dataTypes,
+        startTime: todayMidnight,
+        endTime: now,
       );
 
       // Process and organize the data
@@ -251,9 +251,9 @@ class HealthKitService {
       
       try {
         final points = await _health.getHealthDataFromTypes(
-          oneMinuteAgo,
-          now,
-          [HealthDataType.HEART_RATE],
+          types: [HealthDataType.HEART_RATE],
+          startTime: oneMinuteAgo,
+          endTime: now,
         );
         
         if (points.isNotEmpty) {
@@ -281,9 +281,9 @@ class HealthKitService {
       final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
       
       final points = await _health.getHealthDataFromTypes(
-        fiveMinutesAgo,
-        now,
-        [HealthDataType.HEART_RATE],
+        types: [HealthDataType.HEART_RATE],
+        startTime: fiveMinutesAgo,
+        endTime: now,
       );
       
       // If we have recent heart rate data, watch is likely connected

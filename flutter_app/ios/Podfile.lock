@@ -4,7 +4,7 @@ PODS:
   - device_info_plus (0.0.1):
     - Flutter
   - Flutter (1.0.0)
-  - health (1.0.4):
+  - health (13.2.0):
     - Flutter
   - path_provider_foundation (0.0.1):
     - Flutter
@@ -53,9 +53,9 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   app_links: 3dbc685f76b1693c66a6d9dd1e9ab6f73d97dc0a
-  device_info_plus: 335f3ce08d2e174b9fdc3db3db0f4e3b1f66bd89
+  device_info_plus: 21fcca2080fbcd348be798aa36c3e5ed849eefbe
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  health: a38a2b7480871e575ef403a8746cb2c08d20f1a4
+  health: b9d24db6428057ea8aa69518bfccec584fdfbe1e
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
