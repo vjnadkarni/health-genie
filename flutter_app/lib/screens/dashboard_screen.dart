@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/healthkit_service.dart';
 import '../services/database_service.dart';
 import '../services/health_score_service.dart';
+import '../models/user_profile.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -33,6 +36,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isWatchConnected = false;
   Timer? _refreshTimer;
 
+  // Profile data
+  UserProfile _profile = UserProfile();
+  bool _showProfile = false;
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _heightController = TextEditingController();
+  final _weightController = TextEditingController();
+
   // Track current cardiovascular metric display
   int _currentCardioMetric = 0; // 0: HR, 1: HR Range, 2: Resting HR, 3: HRV/Stress
   final List<String> _cardioMetricNames = [
@@ -48,6 +59,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _loadProfile();
     _initializeServices();
     // Refresh UI every 5 minutes to show new data
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
@@ -160,6 +172,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     
                     // Recommendations
                     _buildRecommendations(),
+                    const SizedBox(height: 20),
+
+                    // Profile Section
+                    _buildProfileSection(),
                   ],
                 ),
               ),
@@ -676,10 +692,325 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> _loadProfile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final profileJson = prefs.getString('user_profile');
+      if (profileJson != null) {
+        setState(() {
+          _profile = UserProfile.fromJson(jsonDecode(profileJson));
+          _nameController.text = _profile.name ?? '';
+          _emailController.text = _profile.email ?? '';
+          if (_profile.useImperialUnits) {
+            _heightController.text = '${_profile.heightFeetInt ?? ''}\'${_profile.heightInchesRemainder ?? ''}"';
+            _weightController.text = _profile.weightLbs?.toStringAsFixed(1) ?? '';
+          } else {
+            _heightController.text = _profile.heightCm?.toStringAsFixed(0) ?? '';
+            _weightController.text = _profile.weightKg?.toStringAsFixed(1) ?? '';
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading profile: $e');
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    try {
+      // Dismiss keyboard first
+      FocusScope.of(context).unfocus();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_profile', jsonEncode(_profile.toJson()));
+
+      // Show success message
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (context) => CupertinoAlertDialog(
+            title: const Text('Success'),
+            content: const Text('Profile saved successfully'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving profile: $e');
+      _showError('Failed to save profile');
+    }
+  }
+
+  Widget _buildProfileSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _showProfile = !_showProfile;
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemGrey6,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'User Profile',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Icon(
+                  _showProfile ? CupertinoIcons.chevron_up : CupertinoIcons.chevron_down,
+                  color: CupertinoColors.systemGrey,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_showProfile) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemGrey6,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                _buildProfileField('Name', _nameController, (value) {
+                  _profile.name = value;
+                }),
+                const Divider(),
+                _buildProfileField('Email', _emailController, (value) {
+                  _profile.email = value;
+                }, keyboardType: TextInputType.emailAddress),
+                const Divider(),
+                _buildGenderSelector(),
+                const Divider(),
+                _buildDateOfBirthPicker(),
+                const Divider(),
+                _buildUnitToggle(),
+                const Divider(),
+                _buildProfileField(
+                  _profile.useImperialUnits ? 'Height (ft\'in")' : 'Height (cm)',
+                  _heightController,
+                  (value) {
+                    if (_profile.useImperialUnits) {
+                      // Parse feet and inches
+                      final parts = value.replaceAll('"', '').split('\'');
+                      if (parts.length == 2) {
+                        final feet = int.tryParse(parts[0]) ?? 0;
+                        final inches = int.tryParse(parts[1]) ?? 0;
+                        _profile.heightCm = (feet * 30.48) + (inches * 2.54);
+                      }
+                    } else {
+                      _profile.heightCm = double.tryParse(value);
+                    }
+                  },
+                ),
+                const Divider(),
+                _buildProfileField(
+                  _profile.useImperialUnits ? 'Weight (lbs)' : 'Weight (kg)',
+                  _weightController,
+                  (value) {
+                    if (_profile.useImperialUnits) {
+                      final lbs = double.tryParse(value);
+                      if (lbs != null) {
+                        _profile.weightKg = lbs / 2.20462;
+                      }
+                    } else {
+                      _profile.weightKg = double.tryParse(value);
+                    }
+                  },
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 16),
+                CupertinoButton.filled(
+                  child: const Text('Save Profile'),
+                  onPressed: _saveProfile,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildProfileField(String label, TextEditingController controller, Function(String) onChanged, {TextInputType? keyboardType}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(label),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: CupertinoTextField(
+              controller: controller,
+              placeholder: 'Enter $label',
+              keyboardType: keyboardType,
+              onChanged: onChanged,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGenderSelector() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 100,
+            child: Text('Gender'),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: CupertinoSegmentedControl<String>(
+              groupValue: _profile.gender,
+              children: const {
+                'male': Text('Male'),
+                'female': Text('Female'),
+                'other': Text('Other'),
+              },
+              onValueChanged: (value) {
+                setState(() {
+                  _profile.gender = value;
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateOfBirthPicker() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 100,
+            child: Text('Date of Birth'),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: CupertinoButton(
+              padding: EdgeInsets.zero,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: CupertinoColors.systemGrey5,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _profile.dateOfBirth != null
+                          ? '${_profile.dateOfBirth!.month}/${_profile.dateOfBirth!.day}/${_profile.dateOfBirth!.year}'
+                          : 'Select date',
+                      style: TextStyle(
+                        color: _profile.dateOfBirth != null
+                            ? CupertinoColors.label
+                            : CupertinoColors.placeholderText,
+                      ),
+                    ),
+                    const Icon(CupertinoIcons.calendar, size: 20),
+                  ],
+                ),
+              ),
+              onPressed: () {
+                showCupertinoModalPopup(
+                  context: context,
+                  builder: (context) => Container(
+                    height: 216,
+                    color: CupertinoColors.systemBackground.resolveFrom(context),
+                    child: CupertinoDatePicker(
+                      mode: CupertinoDatePickerMode.date,
+                      initialDateTime: _profile.dateOfBirth ?? DateTime(1990, 1, 1),
+                      maximumDate: DateTime.now(),
+                      minimumDate: DateTime(1900),
+                      onDateTimeChanged: (date) {
+                        setState(() {
+                          _profile.dateOfBirth = date;
+                        });
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUnitToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 100,
+            child: Text('Units'),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: CupertinoSegmentedControl<bool>(
+              groupValue: _profile.useImperialUnits,
+              children: const {
+                false: Text('Metric'),
+                true: Text('Imperial'),
+              },
+              onValueChanged: (value) {
+                setState(() {
+                  _profile.useImperialUnits = value ?? false;
+                  // Update text fields with converted values
+                  if (_profile.useImperialUnits) {
+                    _heightController.text = '${_profile.heightFeetInt ?? ''}\'${_profile.heightInchesRemainder ?? ''}"';
+                    _weightController.text = _profile.weightLbs?.toStringAsFixed(1) ?? '';
+                  } else {
+                    _heightController.text = _profile.heightCm?.toStringAsFixed(0) ?? '';
+                    _weightController.text = _profile.weightKg?.toStringAsFixed(1) ?? '';
+                  }
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _healthKit.stopDataCollection();
     _refreshTimer?.cancel();
+    _nameController.dispose();
+    _emailController.dispose();
+    _heightController.dispose();
+    _weightController.dispose();
     super.dispose();
   }
 }
