@@ -84,7 +84,7 @@ class HealthKitService {
   }
 
   /// Start collecting health data at regular intervals
-  void startDataCollection({Duration interval = const Duration(minutes: 5)}) {
+  void startDataCollection({Duration interval = const Duration(seconds: 30)}) {
     if (!_isInitialized) {
       debugPrint('HealthKit not initialized. Call initialize() first.');
       return;
@@ -107,7 +107,7 @@ class HealthKitService {
       _collectHealthData();
     });
 
-    debugPrint('Started health data collection with ${interval.inMinutes} minute interval');
+    debugPrint('Started health data collection with ${interval.inSeconds} second interval');
   }
 
   /// Stop collecting health data
@@ -127,6 +127,7 @@ class HealthKitService {
     // Get data from today for totals, but recent for real-time values
     final now = DateTime.now();
     final todayMidnight = DateTime(now.year, now.month, now.day, 0, 0, 0);
+    final last24Hours = now.subtract(const Duration(hours: 24));
 
     try {
       // Fetch health data points from midnight for totals
@@ -135,6 +136,33 @@ class HealthKitService {
         startTime: todayMidnight,
         endTime: now,
       );
+
+      // Also try to get SpO2 from last 24 hours if not found
+      if (!healthDataPoints.any((p) => p.type == HealthDataType.BLOOD_OXYGEN)) {
+        debugPrint('No SpO2 today, checking last 24 hours...');
+        try {
+          final spO2Points = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.BLOOD_OXYGEN],
+            startTime: last24Hours,
+            endTime: now,
+          );
+          if (spO2Points.isNotEmpty) {
+            healthDataPoints.addAll(spO2Points);
+            debugPrint('Found ${spO2Points.length} SpO2 measurements in last 24h');
+          }
+        } catch (e) {
+          debugPrint('Error fetching SpO2: $e');
+        }
+      }
+
+      debugPrint('Raw health data points collected: ${healthDataPoints.length}');
+
+      // Log data types found
+      Set<HealthDataType> foundTypes = {};
+      for (var point in healthDataPoints) {
+        foundTypes.add(point.type);
+      }
+      debugPrint('Data types found: ${foundTypes.map((t) => t.toString()).join(', ')}');
 
       // Process and organize the data
       healthData = _processHealthData(healthDataPoints, now);
@@ -149,10 +177,16 @@ class HealthKitService {
       }
       
       // Log collection with details
-      debugPrint('Collected ${healthDataPoints.length} health data points');
-      debugPrint('Latest heart rate: ${healthData['heart_rate']}');
+      debugPrint('=== Health Data Collection Summary ===');
+      debugPrint('Total data points: ${healthDataPoints.length}');
+      debugPrint('Heart rate: ${healthData['heart_rate']} bpm');
+      debugPrint('HRV: ${healthData['heart_rate_variability']} ms');
+      debugPrint('SpO2: ${healthData['blood_oxygen']}%');
       debugPrint('Steps today: ${healthData['steps']}');
       debugPrint('Distance: ${healthData['distance']}m');
+      debugPrint('Active energy: ${healthData['active_energy']} kcal');
+      debugPrint('Current activity: ${healthData['current_activity']}');
+      debugPrint('=====================================');
       
       // Here you would typically save to local database
       // For now, we'll just return the data
@@ -166,10 +200,16 @@ class HealthKitService {
 
   /// Process raw health data points into organized structure
   Map<String, dynamic> _processHealthData(List<HealthDataPoint> points, DateTime timestamp) {
-    // Get blood oxygen as percentage (it comes as fraction 0-1)
+    // Get blood oxygen as percentage (it comes as fraction 0-1 or percentage)
     var bloodOxygen = _getLatestValue(points, HealthDataType.BLOOD_OXYGEN);
-    if (bloodOxygen != null && bloodOxygen <= 1.0) {
-      bloodOxygen = bloodOxygen * 100; // Convert to percentage
+    if (bloodOxygen != null) {
+      // If value is between 0 and 1, it's a fraction - convert to percentage
+      if (bloodOxygen <= 1.0) {
+        bloodOxygen = bloodOxygen * 100;
+      }
+      debugPrint('SpO2 raw value: $bloodOxygen%');
+    } else {
+      debugPrint('No SpO2 data available from HealthKit');
     }
 
     // Update session SpO2 range with actual measurements only
@@ -204,6 +244,9 @@ class HealthKitService {
       debugPrint('HRV measured: ${hrv.toStringAsFixed(1)} ms');
     }
 
+    // Get current workout/activity
+    final currentActivity = _getCurrentActivity(points);
+
     Map<String, dynamic> processedData = {
       'timestamp': timestamp.toIso8601String(),
       'heart_rate': currentHr,
@@ -218,6 +261,7 @@ class HealthKitService {
       'blood_oxygen_min': _sessionMinSpO2,
       'blood_oxygen_max': _sessionMaxSpO2,
       'body_temperature': _getLatestValue(points, HealthDataType.BODY_TEMPERATURE),
+      'current_activity': currentActivity,
     };
 
     return processedData;
@@ -253,6 +297,46 @@ class HealthKitService {
     });
   }
 
+
+  /// Get the current activity from workout data
+  String? _getCurrentActivity(List<HealthDataPoint> points) {
+    final workoutPoints = points.where((p) => p.type == HealthDataType.WORKOUT).toList();
+    if (workoutPoints.isEmpty) return null;
+
+    // Sort by date to get the most recent
+    workoutPoints.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
+
+    // Check if the most recent workout is currently active (within last 10 minutes)
+    final mostRecent = workoutPoints.first;
+    final now = DateTime.now();
+    if (now.difference(mostRecent.dateTo).inMinutes <= 10) {
+      // Parse the workout type from the value
+      final workoutValue = mostRecent.value;
+      if (workoutValue is WorkoutHealthValue) {
+        return _mapWorkoutType(workoutValue.workoutActivityType);
+      }
+    }
+
+    return null;
+  }
+
+  /// Map HealthKit workout types to readable activity names
+  String _mapWorkoutType(HealthWorkoutActivityType? type) {
+    if (type == null) return 'Unknown';
+
+    switch (type) {
+      case HealthWorkoutActivityType.WALKING:
+        return 'Walking';
+      case HealthWorkoutActivityType.RUNNING:
+        return 'Running';
+      case HealthWorkoutActivityType.ELLIPTICAL:
+        return 'Elliptical';
+      case HealthWorkoutActivityType.ROWING:
+        return 'Rowing';
+      default:
+        return 'Exercise';
+    }
+  }
 
   /// Process sleep data
   Map<String, dynamic> _getSleepData(List<HealthDataPoint> points) {

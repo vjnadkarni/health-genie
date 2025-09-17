@@ -12,7 +12,7 @@ class DatabaseService {
   
   // Database configuration
   static const String _databaseName = 'health_genie.db';
-  static const int _databaseVersion = 3;
+  static const int _databaseVersion = 4;
   
   // Table names
   static const String tableBiometrics = 'biometrics';
@@ -59,6 +59,7 @@ class DatabaseService {
         blood_oxygen_min REAL,
         blood_oxygen_max REAL,
         body_temperature REAL,
+        current_activity TEXT,
         sleep_total REAL,
         sleep_deep REAL,
         sleep_light REAL,
@@ -124,6 +125,12 @@ class DatabaseService {
       await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN blood_oxygen_min REAL');
       await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN blood_oxygen_max REAL');
       debugPrint('Added blood_oxygen_min and blood_oxygen_max columns to biometrics table');
+    }
+
+    if (oldVersion < 4) {
+      // Add new column for current activity
+      await db.execute('ALTER TABLE $tableBiometrics ADD COLUMN current_activity TEXT');
+      debugPrint('Added current_activity column to biometrics table');
     }
   }
 

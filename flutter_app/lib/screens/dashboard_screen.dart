@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/healthkit_service.dart';
 import '../services/database_service.dart';
 import '../services/health_score_service.dart';
+import '../services/calorie_service.dart';
 import '../models/user_profile.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -55,6 +56,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Track current blood oxygen metric display
   int _currentSpO2Metric = 0; // 0: Current SpO2, 1: SpO2 Range
+
+  // Track current activity metric display
+  int _currentActivityMetric = 0; // 0: Steps, 1: Calories, 2: Current Activity
 
   @override
   void initState() {
@@ -311,6 +315,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
+    // Special handling for Activity card
+    if (title == 'Activity') {
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _currentActivityMetric = (_currentActivityMetric + 1) % 3;
+          });
+        },
+        child: _buildActivityMetricCard(),
+      );
+    }
+
     // Default card for other categories
     final color = _scoreService.getScoreColor(score);
 
@@ -504,6 +520,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildActivityMetricCard() {
+    // Calculate calories burned
+    final caloriesBurned = CalorieService.calculateCaloriesBurned(
+      profile: _profile,
+      activeEnergyFromHealthKit: _latestBiometrics['active_energy']?.toDouble(),
+      heartRate: _latestBiometrics['heart_rate']?.toDouble(),
+      steps: _latestBiometrics['steps']?.toInt(),
+      currentActivity: _latestBiometrics['current_activity'],
+    );
+
+    String displayValue = '--';
+    String subtitle = '';
+    IconData icon = CupertinoIcons.flame_fill;
+    Color iconColor = CupertinoColors.systemOrange;
+    Widget? progressBar;
+
+    switch (_currentActivityMetric) {
+      case 0: // Steps
+        final steps = _latestBiometrics['steps']?.toInt() ?? 0;
+        displayValue = steps.toString();
+        subtitle = 'Steps Today';
+        icon = CupertinoIcons.person_2;
+        iconColor = CupertinoColors.systemGreen;
+        // Add progress bar
+        final progress = (steps / 10000).clamp(0.0, 1.0);
+        progressBar = Container(
+          height: 4,
+          margin: const EdgeInsets.only(top: 4),
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemGrey5,
+            borderRadius: BorderRadius.circular(2),
+          ),
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              decoration: BoxDecoration(
+                color: iconColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        );
+        break;
+
+      case 1: // Calories
+        displayValue = '${caloriesBurned.toStringAsFixed(0)}';
+        subtitle = 'Calories Burned';
+        icon = CupertinoIcons.flame_fill;
+        iconColor = CupertinoColors.systemOrange;
+        break;
+
+      case 2: // Current Activity
+        final activity = _latestBiometrics['current_activity'] ?? 'No activity';
+        displayValue = activity == 'No activity' ? 'Rest' : activity;
+        subtitle = 'Current Activity';
+        icon = _getActivityIcon(activity);
+        iconColor = activity != 'No activity'
+            ? CupertinoColors.systemGreen
+            : CupertinoColors.systemGrey;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: iconColor, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            displayValue,
+            style: TextStyle(
+              fontSize: _currentActivityMetric == 2 ? 16 : 20,
+              fontWeight: FontWeight.bold,
+              color: CupertinoColors.label,
+            ),
+          ),
+          if (progressBar != null) progressBar,
+        ],
+      ),
+    );
+  }
+
   Color _getSpO2Color(double spO2) {
     if (spO2 >= 95) {
       return CupertinoColors.systemGreen;
@@ -574,84 +683,236 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Today\'s Activity',
+          'Activity',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildActivityCard(
-                'Steps',
-                _latestBiometrics['steps']?.toStringAsFixed(0) ?? '0',
-                '10,000',
-                CupertinoIcons.flame,
-                CupertinoColors.systemOrange,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActivityCard(
-                'Distance',
-                '${((_latestBiometrics['distance'] ?? 0) / 1000).toStringAsFixed(1)} km',
-                '8 km',
-                CupertinoIcons.location,
-                CupertinoColors.systemBlue,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActivityCard(
-                'Calories',
-                _latestBiometrics['active_energy']?.toStringAsFixed(0) ?? '0',
-                '500',
-                CupertinoIcons.flame,
-                CupertinoColors.systemRed,
-              ),
-            ),
-          ],
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _currentActivityMetric = (_currentActivityMetric + 1) % 3;
+            });
+          },
+          child: _buildActivityDisplay(),
         ),
       ],
     );
   }
 
-  Widget _buildActivityCard(String title, String value, String goal, IconData icon, Color color) {
+  Widget _buildActivityDisplay() {
+    // Calculate calories burned
+    final caloriesBurned = CalorieService.calculateCaloriesBurned(
+      profile: _profile,
+      activeEnergyFromHealthKit: _latestBiometrics['active_energy']?.toDouble(),
+      heartRate: _latestBiometrics['heart_rate']?.toDouble(),
+      steps: _latestBiometrics['steps']?.toInt(),
+      currentActivity: _latestBiometrics['current_activity'],
+    );
+
+    String title = '';
+    String value = '';
+    String subtitle = '';
+    IconData icon = CupertinoIcons.flame;
+    Color color = CupertinoColors.systemOrange;
+
+    switch (_currentActivityMetric) {
+      case 0: // Steps
+        final steps = _latestBiometrics['steps']?.toInt() ?? 0;
+        title = 'Steps Today';
+        value = steps.toString();
+        subtitle = 'Goal: 10,000';
+        icon = CupertinoIcons.flame;
+        color = CupertinoColors.systemOrange;
+
+        // Add progress indicator
+        final progress = (steps / 10000).clamp(0.0, 1.0);
+        return _buildActivityCardWithProgress(
+          title, value, subtitle, icon, color, progress
+        );
+
+      case 1: // Calories
+        title = 'Calories Burned';
+        value = caloriesBurned.toStringAsFixed(0);
+        subtitle = 'Since midnight';
+        icon = CupertinoIcons.flame_fill;
+        color = CupertinoColors.systemRed;
+
+        // Calculate progress against daily goal
+        final dailyGoal = _profile.hasRequiredData
+            ? CalorieService.calculateTDEE(_profile, 'moderate') * 0.3  // 30% of TDEE for active calories
+            : 500.0;
+        final progress = (caloriesBurned / dailyGoal).clamp(0.0, 1.0);
+        return _buildActivityCardWithProgress(
+          title, value, subtitle, icon, color, progress
+        );
+
+      case 2: // Current Activity
+        final activity = _latestBiometrics['current_activity'] ?? 'No activity';
+        title = 'Current Activity';
+        value = activity;
+        subtitle = activity != 'No activity' ? 'Active now' : 'Start a workout';
+        icon = _getActivityIcon(activity);
+        color = activity != 'No activity'
+            ? CupertinoColors.systemGreen
+            : CupertinoColors.systemGrey;
+        return _buildActivityCardSimple(title, value, subtitle, icon, color);
+
+      default:
+        return const SizedBox();
+    }
+  }
+
+  IconData _getActivityIcon(String? activity) {
+    if (activity == null) return CupertinoIcons.circle;
+
+    switch (activity.toLowerCase()) {
+      case 'walking':
+        return CupertinoIcons.person_fill;
+      case 'running':
+        return CupertinoIcons.hare_fill;
+      case 'cycling':
+        return CupertinoIcons.car_fill;
+      case 'swimming':
+        return CupertinoIcons.drop_fill;
+      case 'elliptical':
+      case 'rowing':
+        return CupertinoIcons.arrow_right_arrow_left;
+      case 'stairs':
+        return CupertinoIcons.arrow_up_right;
+      default:
+        return CupertinoIcons.sportscourt_fill;
+    }
+  }
+
+  Widget _buildActivityCardWithProgress(
+    String title, String value, String subtitle,
+    IconData icon, Color color, double progress
+  ) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: CupertinoColors.systemGrey6,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: color, size: 24),
+                  const SizedBox(width: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              Icon(
+                CupertinoIcons.chevron_right,
+                color: CupertinoColors.systemGrey3,
+                size: 16,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 18,
+            style: TextStyle(
+              fontSize: 36,
               fontWeight: FontWeight.bold,
-            ),
-          ),
-          Text(
-            'of $goal',
-            style: const TextStyle(
-              fontSize: 12,
-              color: CupertinoColors.systemGrey,
+              color: color,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            title,
-            style: const TextStyle(fontSize: 12),
+            subtitle,
+            style: const TextStyle(
+              fontSize: 14,
+              color: CupertinoColors.systemGrey,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: CupertinoColors.systemGrey5,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildActivityCardSimple(
+    String title, String value, String subtitle,
+    IconData icon, Color color
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: color, size: 24),
+                  const SizedBox(width: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              Icon(
+                CupertinoIcons.chevron_right,
+                color: CupertinoColors.systemGrey3,
+                size: 16,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: value.length > 10 ? 24 : 36,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 14,
+              color: CupertinoColors.systemGrey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Widget _buildRecommendations() {
     final recommendations = _scoreService.getRecommendations(_currentScores);
