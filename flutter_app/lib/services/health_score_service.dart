@@ -44,26 +44,38 @@ class HealthScoreService {
   /// Calculate cardiovascular health score (0-100)
   double _calculateCardiovascularScore(Map<String, dynamic> data) {
     double score = 100.0;
-    
-    // Heart Rate scoring
-    final heartRate = data['heart_rate'] as double?;
-    if (heartRate != null) {
-      // Optimal resting heart rate: 60-80 bpm
-      if (heartRate >= 60 && heartRate <= 80) {
-        // Perfect range
-      } else if (heartRate >= 50 && heartRate < 60) {
-        score -= 5; // Athletic range
-      } else if (heartRate > 80 && heartRate <= 90) {
-        score -= 10; // Slightly elevated
-      } else if (heartRate > 90 && heartRate <= 100) {
-        score -= 20; // Elevated
-      } else if (heartRate > 100) {
-        score -= 30; // High
-      } else if (heartRate < 50) {
-        score -= 15; // Very low
+
+    // Check if user is currently exercising
+    final currentActivity = data['current_activity'] as String?;
+    final isExercising = currentActivity != null &&
+        currentActivity != 'No activity' &&
+        currentActivity.toLowerCase() != 'rest';
+
+    // Use resting heart rate for scoring (not current HR during exercise)
+    final restingHeartRate = data['resting_heart_rate'] as double?;
+    final currentHeartRate = data['heart_rate'] as double?;
+
+    // For cardiovascular scoring, prioritize resting metrics
+    final heartRateForScoring = restingHeartRate ??
+        (!isExercising ? currentHeartRate : null);
+
+    if (heartRateForScoring != null) {
+      // Optimal resting heart rate: 50-70 bpm for good fitness
+      if (heartRateForScoring >= 50 && heartRateForScoring <= 70) {
+        // Perfect range - indicates good cardiovascular fitness
+      } else if (heartRateForScoring >= 40 && heartRateForScoring < 50) {
+        score -= 5; // Athletic/excellent fitness
+      } else if (heartRateForScoring > 70 && heartRateForScoring <= 80) {
+        score -= 10; // Average fitness
+      } else if (heartRateForScoring > 80 && heartRateForScoring <= 90) {
+        score -= 20; // Below average fitness
+      } else if (heartRateForScoring > 90) {
+        score -= 35; // Poor cardiovascular fitness
+      } else if (heartRateForScoring < 40) {
+        score -= 10; // Very athletic (or potential issue)
       }
     } else {
-      score -= 10; // No data penalty
+      score -= 10; // No resting data penalty
     }
 
     // Heart Rate Variability scoring
@@ -283,7 +295,13 @@ class HealthScoreService {
   /// Calculate stress score (0-100, higher is better/less stressed)
   double _calculateStressScore(Map<String, dynamic> data) {
     double score = 100.0;
-    
+
+    // Check if user is currently exercising
+    final currentActivity = data['current_activity'] as String?;
+    final isExercising = currentActivity != null &&
+        currentActivity != 'No activity' &&
+        currentActivity.toLowerCase() != 'rest';
+
     // HRV is a primary indicator of stress
     final hrv = data['heart_rate_variability'] as double?;
     if (hrv != null) {
@@ -300,23 +318,26 @@ class HealthScoreService {
       score -= 20;
     }
 
-    // Elevated resting heart rate can indicate stress
-    final restingHR = data['resting_heart_rate'] as double?;
-    if (restingHR != null) {
-      final heartRate = data['heart_rate'] as double? ?? restingHR;
-      final hrElevation = heartRate - restingHR;
-      
-      if (hrElevation <= 5) {
-        // Minimal elevation
-      } else if (hrElevation <= 10) {
-        score -= 10;
-      } else if (hrElevation <= 20) {
-        score -= 25;
+    // Only check HR elevation if NOT exercising
+    // During exercise, elevated HR is normal and not stress-related
+    if (!isExercising) {
+      final restingHR = data['resting_heart_rate'] as double?;
+      if (restingHR != null) {
+        final heartRate = data['heart_rate'] as double? ?? restingHR;
+        final hrElevation = heartRate - restingHR;
+
+        if (hrElevation <= 5) {
+          // Minimal elevation
+        } else if (hrElevation <= 10) {
+          score -= 10;
+        } else if (hrElevation <= 20) {
+          score -= 25;
+        } else {
+          score -= 35;
+        }
       } else {
-        score -= 35;
+        score -= 15;
       }
-    } else {
-      score -= 15;
     }
 
     // Poor sleep quality increases stress

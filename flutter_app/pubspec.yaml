@@ -48,7 +48,7 @@ dependencies:
   path_provider: ^2.1.1
   
   # Cloud Database
-  supabase_flutter: ^2.0.0
+  supabase_flutter: ^2.10.1
   
   # Data Visualization
   fl_chart: ^0.65.0
@@ -64,6 +64,7 @@ dependencies:
   
   # Permissions
   permission_handler: ^11.1.0
+  connectivity_plus: ^7.0.0
 
 dev_dependencies:
   flutter_test:

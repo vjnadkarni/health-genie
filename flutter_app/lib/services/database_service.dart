@@ -332,19 +332,19 @@ class DatabaseService {
   /// Get database statistics
   Future<Map<String, int>> getDatabaseStats() async {
     final db = await database;
-    
+
     final biometricsCount = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM $tableBiometrics')
     ) ?? 0;
-    
+
     final scoresCount = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM $tableHealthScores')
     ) ?? 0;
-    
+
     final unsyncedCount = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM $tableBiometrics WHERE is_synced = 0')
     ) ?? 0;
-    
+
     final syncQueueCount = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM $tableSyncQueue')
     ) ?? 0;

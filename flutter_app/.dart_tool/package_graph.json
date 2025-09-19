@@ -7,6 +7,7 @@
       "name": "health_genie",
       "version": "1.0.0+1",
       "dependencies": [
+        "connectivity_plus",
         "cupertino_icons",
         "dio",
         "fl_chart",
@@ -53,6 +54,19 @@
         "stream_channel",
         "test_api",
         "vector_math"
+      ]
+    },
+    {
+      "name": "connectivity_plus",
+      "version": "7.0.0",
+      "dependencies": [
+        "collection",
+        "connectivity_plus_platform_interface",
+        "flutter",
+        "flutter_web_plugins",
+        "meta",
+        "nm",
+        "web"
       ]
     },
     {
@@ -133,7 +147,7 @@
     },
     {
       "name": "supabase_flutter",
-      "version": "2.10.0",
+      "version": "2.10.1",
       "dependencies": [
         "app_links",
         "async",
@@ -314,6 +328,34 @@
       ]
     },
     {
+      "name": "nm",
+      "version": "0.5.0",
+      "dependencies": [
+        "dbus"
+      ]
+    },
+    {
+      "name": "web",
+      "version": "1.1.1",
+      "dependencies": []
+    },
+    {
+      "name": "connectivity_plus_platform_interface",
+      "version": "2.0.1",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "flutter_web_plugins",
+      "version": "0.0.0",
+      "dependencies": [
+        "flutter"
+      ]
+    },
+    {
       "name": "permission_handler_platform_interface",
       "version": "4.3.0",
       "dependencies": [
@@ -465,11 +507,6 @@
       ]
     },
     {
-      "name": "web",
-      "version": "1.1.1",
-      "dependencies": []
-    },
-    {
       "name": "equatable",
       "version": "2.0.7",
       "dependencies": [
@@ -498,7 +535,7 @@
     },
     {
       "name": "supabase",
-      "version": "2.9.0",
+      "version": "2.9.1",
       "dependencies": [
         "functions_client",
         "gotrue",
@@ -713,17 +750,20 @@
       ]
     },
     {
+      "name": "dbus",
+      "version": "0.7.11",
+      "dependencies": [
+        "args",
+        "ffi",
+        "meta",
+        "xml"
+      ]
+    },
+    {
       "name": "plugin_platform_interface",
       "version": "2.1.8",
       "dependencies": [
         "meta"
-      ]
-    },
-    {
-      "name": "flutter_web_plugins",
-      "version": "0.0.0",
-      "dependencies": [
-        "flutter"
       ]
     },
     {
@@ -846,7 +886,7 @@
     },
     {
       "name": "gotrue",
-      "version": "2.14.0",
+      "version": "2.15.0",
       "dependencies": [
         "collection",
         "crypto",
@@ -949,6 +989,20 @@
       "dependencies": []
     },
     {
+      "name": "xml",
+      "version": "6.6.1",
+      "dependencies": [
+        "collection",
+        "meta",
+        "petitparser"
+      ]
+    },
+    {
+      "name": "args",
+      "version": "2.7.0",
+      "dependencies": []
+    },
+    {
       "name": "retry",
       "version": "3.1.2",
       "dependencies": []
@@ -975,6 +1029,14 @@
       "dependencies": [
         "ffi",
         "flutter",
+        "meta"
+      ]
+    },
+    {
+      "name": "petitparser",
+      "version": "7.0.1",
+      "dependencies": [
+        "collection",
         "meta"
       ]
     },

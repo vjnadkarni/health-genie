@@ -8,8 +8,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/healthkit_service.dart';
 import '../services/database_service.dart';
 import '../services/health_score_service.dart';
+import '../services/long_term_health_score_service.dart';
 import '../services/calorie_service.dart';
+import '../services/supabase_auth_service.dart';
+import '../services/cloud_sync_service.dart';
 import '../models/user_profile.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -22,6 +26,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final HealthKitService _healthKit = HealthKitService();
   final DatabaseService _database = DatabaseService();
   final HealthScoreService _scoreService = HealthScoreService();
+  final LongTermHealthScoreService _longTermScoreService = LongTermHealthScoreService();
+  final SupabaseAuthService _authService = SupabaseAuthService();
+  final CloudSyncService _syncService = CloudSyncService();
 
   Map<String, double> _currentScores = {
     'overall': 0,
@@ -31,6 +38,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     'recovery': 0,
     'stress': 0,
   };
+
+  Map<String, dynamic> _longTermScores = {};
+  double _scoreConfidence = 0.0;
 
   Map<String, dynamic> _latestBiometrics = {};
   bool _isLoading = true;
@@ -60,14 +70,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Track current activity metric display
   int _currentActivityMetric = 0; // 0: Steps, 1: Calories, 2: Current Activity
 
+  // Track refresh states for on-demand refresh buttons
+  final Map<String, bool> _isRefreshing = {};
+  final Map<String, DateTime> _lastRefreshTime = {};
+
   @override
   void initState() {
     super.initState();
     _loadProfile();
     _initializeServices();
-    // Refresh UI every 5 minutes to show new data
-    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      _loadLatestData();
+    // Refresh UI every 10 seconds to show updated metrics
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _updateMetricsFromHealthKit();
     });
   }
 
@@ -75,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Initialize HealthKit
     final initialized = await _healthKit.initialize();
     if (initialized) {
-      // Start data collection
+      // Start multi-tier data collection
       _healthKit.startDataCollection();
       
       // Check watch connection
@@ -98,17 +112,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final biometrics = await _database.getRecentBiometrics(limit: 1);
     if (biometrics.isNotEmpty) {
       _latestBiometrics = biometrics.first;
-      
+
       // Debug: Log the actual biometric values
       debugPrint('Loaded biometrics: heart_rate=${_latestBiometrics['heart_rate']}, blood_oxygen=${_latestBiometrics['blood_oxygen']}');
-      
-      // Calculate health scores
+
+      // Calculate instant health scores (for comparison/fallback)
       _currentScores = _scoreService.calculateHealthScore(_latestBiometrics);
+
+      // Calculate long-term health scores
+      final longTermResult = await _longTermScoreService.calculateLongTermHealthScore();
+      _longTermScores = longTermResult['scores'] != null
+          ? Map<String, double>.from(longTermResult['scores'] as Map)
+          : {};
+      _scoreConfidence = longTermResult['confidence'] ?? 0.0;
+
+      // Use long-term scores if confidence is sufficient, otherwise fall back to instant scores
+      if (_scoreConfidence >= 0.5) {
+        _currentScores = Map<String, double>.from(_longTermScores);
+        debugPrint('Using long-term scores with confidence: $_scoreConfidence');
+      } else {
+        debugPrint('Low confidence in long-term data ($_scoreConfidence), using instant scores');
+      }
+
       debugPrint('Calculated scores: overall=${_currentScores['overall']}');
     }
-    
+
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  void _updateMetricsFromHealthKit() {
+    // Get live data from HealthKit service
+    final liveData = _healthKit.latestHealthData;
+
+    // Merge live data with existing biometrics
+    if (liveData.isNotEmpty) {
+      // Create a new mutable map from the database data
+      _latestBiometrics = Map<String, dynamic>.from(_latestBiometrics);
+      _latestBiometrics.addAll(liveData);
+
+      // Recalculate scores with updated data
+      _currentScores = _scoreService.calculateHealthScore(_latestBiometrics);
+
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -136,6 +185,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Cloud sync status
+            if (_authService.isLoggedIn) ...[
+              Icon(
+                _syncService.isSyncing
+                    ? CupertinoIcons.arrow_2_circlepath
+                    : CupertinoIcons.cloud_upload,
+                color: _syncService.isSyncing
+                    ? CupertinoColors.activeBlue
+                    : CupertinoColors.activeGreen,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+            ],
+            // Watch connection status
             Icon(
               _isWatchConnected ? CupertinoIcons.device_phone_portrait : CupertinoIcons.exclamationmark_triangle,
               color: _isWatchConnected ? CupertinoColors.activeGreen : CupertinoColors.systemOrange,
@@ -158,6 +221,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Cloud sync banner
+                    if (!_authService.isLoggedIn)
+                      _buildSyncPromptBanner(),
+
                     // Overall Health Score Card
                     _buildOverallScoreCard(),
                     const SizedBox(height: 20),
@@ -191,7 +258,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final score = _currentScores['overall'] ?? 0;
     final status = _scoreService.getHealthStatus(score);
     final color = _scoreService.getScoreColor(score);
-    
+
+    // Determine data quality label based on confidence
+    String dataQuality;
+    Color dataQualityColor;
+    if (_scoreConfidence >= 0.8) {
+      dataQuality = 'High Quality Data';
+      dataQualityColor = Colors.green;
+    } else if (_scoreConfidence >= 0.5) {
+      dataQuality = 'Good Data';
+      dataQualityColor = Colors.lightGreen;
+    } else if (_scoreConfidence >= 0.3) {
+      dataQuality = 'Limited Data';
+      dataQualityColor = Colors.orange;
+    } else {
+      dataQuality = 'Insufficient Data';
+      dataQualityColor = Colors.red;
+    }
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -211,13 +295,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Column(
         children: [
-          const Text(
-            'Overall Health Score',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Overall Health Score',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (_scoreConfidence > 0) Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _scoreConfidence >= 0.5
+                        ? CupertinoIcons.checkmark_seal_fill
+                        : CupertinoIcons.exclamationmark_triangle_fill,
+                      color: dataQualityColor,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      dataQuality,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           Stack(
@@ -250,6 +367,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fontSize: 16,
                     ),
                   ),
+                  if (_scoreConfidence >= 0.5) const SizedBox(height: 4),
+                  if (_scoreConfidence >= 0.5) Text(
+                    '24-hour average',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -271,19 +397,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.5,
+        Column(
           children: [
-            _buildCategoryCard('Cardiovascular', _currentScores['cardiovascular'] ?? 0, CupertinoIcons.heart_fill),
-            _buildCategoryCard('Blood Oxygen', _currentScores['sleep'] ?? 0, CupertinoIcons.drop_fill),
-            _buildCategoryCard('Activity', _currentScores['activity'] ?? 0, CupertinoIcons.flame_fill),
-            _buildCategoryCard('Recovery', _currentScores['recovery'] ?? 0, CupertinoIcons.battery_100),
-            _buildCategoryCard('Stress', _currentScores['stress'] ?? 0, CupertinoIcons.waveform_path),
+            Container(
+              width: double.infinity, // Full width
+              height: 120, // Fixed height for all boxes
+              child: _buildCategoryCard('Cardiovascular', _currentScores['cardiovascular'] ?? 0, CupertinoIcons.heart_fill),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity, // Full width
+              height: 120, // Fixed height for all boxes
+              child: _buildCategoryCard('Blood Oxygen', _currentScores['sleep'] ?? 0, CupertinoIcons.drop_fill),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity, // Full width
+              height: 120, // Fixed height for all boxes
+              child: _buildCategoryCard('Activity', _currentScores['activity'] ?? 0, CupertinoIcons.flame_fill),
+            ),
           ],
         ),
       ],
@@ -364,6 +496,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String subtitle = _cardioMetricNames[_currentCardioMetric];
     Color valueColor = CupertinoColors.label;
     String? stressLevel;
+    bool showRefreshButton = false;
+    String refreshKey = '';
 
     switch (_currentCardioMetric) {
       case 0: // Current Heart Rate
@@ -372,6 +506,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           displayValue = '${hr.toStringAsFixed(0)} bpm';
           valueColor = _getHeartRateColor(hr.toDouble());
         }
+        showRefreshButton = true;
+        refreshKey = 'heart_rate';
         break;
 
       case 1: // HR Range
@@ -396,44 +532,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueColor = _getHRVColor(hrv.toDouble());
           stressLevel = _getStressLevel(hrv.toDouble());
         }
+        showRefreshButton = true;
+        refreshKey = 'hrv';
         break;
     }
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(CupertinoIcons.heart_fill, color: valueColor, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: const TextStyle(fontSize: 12),
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity, // Ensure full width
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemGrey6,
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(height: 4),
-          Text(
-            displayValue,
-            style: TextStyle(
-              fontSize: _currentCardioMetric == 1 ? 18 : 20,
-              fontWeight: FontWeight.bold,
-              color: valueColor,
-            ),
-          ),
-          if (stressLevel != null) ...[
-            Text(
-              stressLevel,
-              style: TextStyle(
-                fontSize: 11,
-                color: valueColor,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(CupertinoIcons.heart_fill, color: valueColor, size: 24),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12),
               ),
-            ),
-          ],
-        ],
-      ),
+              const SizedBox(height: 4),
+              Text(
+                displayValue,
+                style: TextStyle(
+                  fontSize: _currentCardioMetric == 1 ? 18 : 20,
+                  fontWeight: FontWeight.bold,
+                  color: valueColor,
+                ),
+              ),
+              if (stressLevel != null) ...[
+                Text(
+                  stressLevel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: valueColor,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (showRefreshButton)
+          _buildRefreshButton(refreshKey),
+      ],
     );
   }
 
@@ -471,6 +616,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String displayValue = '--';
     String subtitle = _currentSpO2Metric == 0 ? 'Blood Oxygen' : 'SpO2 Range';
     Color valueColor = CupertinoColors.systemRed; // Default red for blood icon
+    bool showRefreshButton = false;
+    String refreshKey = '';
 
     switch (_currentSpO2Metric) {
       case 0: // Current Blood Oxygen
@@ -479,6 +626,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           displayValue = '${spO2.toStringAsFixed(0)}%';
           valueColor = _getSpO2Color(spO2.toDouble());
         }
+        showRefreshButton = true;
+        refreshKey = 'spo2';
         break;
 
       case 1: // SpO2 Range
@@ -491,32 +640,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
         break;
     }
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(CupertinoIcons.drop_fill, color: CupertinoColors.systemRed, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: const TextStyle(fontSize: 12),
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity, // Ensure full width
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemGrey6,
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(height: 4),
-          Text(
-            displayValue,
-            style: TextStyle(
-              fontSize: _currentSpO2Metric == 1 ? 16 : 20,
-              fontWeight: FontWeight.bold,
-              color: _currentSpO2Metric == 0 ? valueColor : CupertinoColors.label,
-            ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(CupertinoIcons.drop_fill, color: CupertinoColors.systemRed, size: 24),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                displayValue,
+                style: TextStyle(
+                  fontSize: _currentSpO2Metric == 1 ? 16 : 20,
+                  fontWeight: FontWeight.bold,
+                  color: _currentSpO2Metric == 0 ? valueColor : CupertinoColors.label,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        if (showRefreshButton)
+          _buildRefreshButton(refreshKey),
+      ],
     );
   }
 
@@ -583,33 +739,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
         break;
     }
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: iconColor, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: const TextStyle(fontSize: 12),
+    bool showRefreshButton = _currentActivityMetric == 2; // Only for current activity
+
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity, // Ensure full width
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemGrey6,
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(height: 4),
-          Text(
-            displayValue,
-            style: TextStyle(
-              fontSize: _currentActivityMetric == 2 ? 16 : 20,
-              fontWeight: FontWeight.bold,
-              color: CupertinoColors.label,
-            ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: iconColor, size: 24),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                displayValue,
+                style: TextStyle(
+                  fontSize: _currentActivityMetric == 2 ? 16 : 20,
+                  fontWeight: FontWeight.bold,
+                  color: CupertinoColors.label,
+                ),
+              ),
+              if (progressBar != null) progressBar,
+            ],
           ),
-          if (progressBar != null) progressBar,
-        ],
-      ),
+        ),
+        if (showRefreshButton)
+          _buildRefreshButton('activity'),
+      ],
     );
   }
 
@@ -621,6 +786,108 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } else {
       return CupertinoColors.systemRed;
     }
+  }
+
+  Widget _buildRefreshButton(String metricKey) {
+    final isRefreshing = _isRefreshing[metricKey] ?? false;
+    final canRefresh = _healthKit.canRefreshMetric(metricKey);
+
+    return Positioned(
+      top: 8,
+      right: 8,
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: (isRefreshing || !canRefresh) ? null : () async {
+              setState(() {
+                _isRefreshing[metricKey] = true;
+              });
+
+              // Add a small delay to ensure spinner is visible
+              await Future.delayed(const Duration(milliseconds: 300));
+
+              // Perform refresh with proper timeout handling
+              bool success = false;
+
+              try {
+                // Call refresh based on metric type
+                switch (metricKey) {
+                  case 'heart_rate':
+                    success = await _healthKit.refreshHeartRate();
+                    break;
+                  case 'hrv':
+                    success = await _healthKit.refreshHRV();
+                    break;
+                  case 'spo2':
+                    success = await _healthKit.refreshSpO2();
+                    break;
+                  case 'activity':
+                    success = await _healthKit.refreshActivity();
+                    break;
+                  case 'body_temp':
+                    success = await _healthKit.refreshBodyTemperature();
+                    break;
+                }
+              } catch (e) {
+                debugPrint('Error during refresh: $e');
+                success = false;
+              }
+
+              // Always update UI state when done
+              if (!mounted) return;
+
+              setState(() {
+                _isRefreshing[metricKey] = false;
+                _lastRefreshTime[metricKey] = DateTime.now();
+                if (success) {
+                  _latestBiometrics = _healthKit.latestHealthData;
+                }
+              });
+
+              // Show appropriate message
+              if (!success && mounted) {
+                // Use context safely with a try-catch
+                try {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('No reading obtained'),
+                        duration: Duration(seconds: 3),
+                        backgroundColor: CupertinoColors.systemOrange,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  debugPrint('Could not show snackbar: $e');
+                }
+              }
+            },
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemGrey4.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Center(
+                child: isRefreshing
+                    ? const CupertinoActivityIndicator(
+                        radius: 10,
+                        color: CupertinoColors.black,
+                      )
+                    : Icon(
+                        CupertinoIcons.arrow_clockwise,
+                        size: 18,
+                        color: canRefresh
+                            ? CupertinoColors.black
+                            : CupertinoColors.black.withOpacity(0.3),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildVitalsSection() {
@@ -648,8 +915,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _buildVitalRow('HRV', '${_latestBiometrics['heart_rate_variability']?.toStringAsFixed(0) ?? '--'} ms', CupertinoIcons.waveform),
               const Divider(),
               _buildVitalRow('Blood Oxygen', '${_latestBiometrics['blood_oxygen']?.toStringAsFixed(0) ?? '--'}%', CupertinoIcons.drop),
-              const Divider(),
-              _buildVitalRow('Body Temp', '${_latestBiometrics['body_temperature']?.toStringAsFixed(1) ?? '--'}°C', CupertinoIcons.thermometer),
             ],
           ),
         ),
@@ -792,6 +1057,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     IconData icon, Color color, double progress
   ) {
     return Container(
+      width: double.infinity, // Ensure full width
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: CupertinoColors.systemGrey6,
@@ -860,6 +1126,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     IconData icon, Color color
   ) {
     return Container(
+      width: double.infinity, // Ensure full width
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: CupertinoColors.systemGrey6,
@@ -1257,6 +1524,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   }
                 });
               },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSyncPromptBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemBlue.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: CupertinoColors.systemBlue.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            CupertinoIcons.cloud_upload,
+            color: CupertinoColors.systemBlue,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Enable Cloud Sync',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  'Sign in to sync your health data across devices',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          CupertinoButton(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            minSize: 0,
+            color: CupertinoColors.systemBlue,
+            borderRadius: BorderRadius.circular(8),
+            onPressed: () async {
+              // Navigate to login screen
+              final result = await Navigator.push(
+                context,
+                CupertinoPageRoute(
+                  builder: (context) => const LoginScreen(),
+                ),
+              );
+
+              if (result == true && mounted) {
+                // Refresh the UI after successful login
+                setState(() {});
+                _syncService.startAutoSync();
+              }
+            },
+            child: const Text(
+              'Sign In',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],

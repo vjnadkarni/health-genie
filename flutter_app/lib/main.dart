@@ -1,17 +1,26 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/settings_screen.dart';
 import 'services/healthkit_service.dart';
 import 'services/database_service.dart';
+import 'config/supabase_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // Initialize Supabase
+  await Supabase.initialize(
+    url: SupabaseConfig.supabaseUrl,
+    anonKey: SupabaseConfig.supabaseAnonKey,
+  );
+
   // Initialize services
   final healthKit = HealthKitService();
   final database = DatabaseService();
-  
+
   runApp(const HealthGenieApp());
 }
 
@@ -114,18 +123,3 @@ class HistoryScreen extends StatelessWidget {
   }
 }
 
-class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('Settings'),
-      ),
-      child: const Center(
-        child: Text('Settings Screen - Coming Soon'),
-      ),
-    );
-  }
-}
