@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project: Health Genie
 
-Health Genie is a Flutter-based iOS health monitoring application that collects biometric data from Apple Watch, calculates health scores, and provides AI-powered health insights.
+Health Genie is a Flutter-based iOS health monitoring application that collects biometric data from Apple Watch, calculates health scores, provides AI-powered health insights, and securely syncs data across devices using HIPAA-compliant cloud storage.
 
 ## Technology Stack
 
@@ -13,6 +13,8 @@ Health Genie is a Flutter-based iOS health monitoring application that collects 
 - **State Management**: Provider package
 - **HealthKit Integration**: health package (pub.dev)
 - **Local Database**: SQLite via sqflite package
+- **Cloud Sync**: Supabase Flutter SDK
+- **Authentication**: Supabase Auth (Email/Password + Apple Sign In)
 - **Testing**: Unit tests, widget tests, integration tests
 
 ### Backend Services (Python)
@@ -21,8 +23,15 @@ Health Genie is a Flutter-based iOS health monitoring application that collects 
 - **LLM**: Claude Sonnet 3.5 (Anthropic)
 
 ### Cloud Infrastructure
-- **Database**: Supabase (PostgreSQL)
-- **Sync Strategy**: WiFi-only manual sync with queue-based uploads
+- **Database**: Supabase (PostgreSQL with Row Level Security)
+- **Authentication**: Supabase Auth (Email/Password + Apple Sign In)
+- **Sync Strategy**: WiFi-only auto-sync (15 min) + manual sync option
+- **Data Tables**:
+  - `health_scores`: Calculated health metrics
+  - `biometric_summaries`: Daily aggregated biometrics
+  - `user_profiles`: User account information
+- **Security**: TLS/SSL encryption, RLS policies, user data isolation
+- **HIPAA Compliance**: Architecture ready (requires Pro tier + BAA)
 
 ## Project Structure
 
@@ -30,11 +39,22 @@ Health Genie is a Flutter-based iOS health monitoring application that collects 
 health-genie/
 ├── flutter_app/           # Flutter mobile application
 │   ├── lib/
+│   │   ├── config/       # Supabase configuration
 │   │   ├── models/       # Data models
-│   │   ├── services/     # HealthKit, database, API services
+│   │   ├── services/     # Core services
+│   │   │   ├── healthkit_service.dart
+│   │   │   ├── database_service.dart
+│   │   │   ├── health_score_service.dart
+│   │   │   ├── cloud_sync_service.dart
+│   │   │   ├── supabase_auth_service.dart
+│   │   │   └── long_term_health_score_service.dart
 │   │   ├── providers/    # State management
 │   │   ├── screens/      # UI screens
+│   │   │   ├── dashboard_screen.dart
+│   │   │   ├── settings_screen.dart
+│   │   │   └── login_screen.dart
 │   │   └── widgets/      # Reusable widgets
+│   ├── supabase/         # Database setup scripts
 │   └── test/             # Unit and widget tests
 ├── backend/              # Python backend
 │   ├── api/             # FastAPI endpoints
@@ -65,14 +85,23 @@ uvicorn api.main:app --reload
 ## Implementation Guidelines
 
 ### Data Collection
-- Collect biometrics only when app is in foreground (with specified exceptions)
-- Persist data from RAM to SQLite every 15 seconds
-- Maintain 24-hour circular buffer for local storage
+- Multi-tier collection intervals:
+  - Fast metrics: 10 seconds (steps, distance, energy)
+  - Standard metrics: 30 seconds (heart rate, activity)
+  - Slow metrics: 3 minutes (HRV, SpO2, resting HR)
+  - Background metrics: 1 hour (body temp, sleep)
+- Persist data from RAM to SQLite with circular buffer
+- Maintain 24-hour local storage (5760 records max)
 - Track unchanged values with special code (-1)
+- Automatic cloud sync every 15 minutes on WiFi
 
 ### Health Score Calculation
 - Categories: Cardiovascular, Sleep, Activity, Recovery, Stress
 - Hybrid approach: rule-based thresholds + AI analysis
+- Dual scoring system:
+  - Instant scores: Real-time calculations
+  - Long-term scores: 30-day weighted averages
+- Confidence levels based on data availability
 - Configurable time windows for trend analysis
 
 ### Error Handling
@@ -80,6 +109,10 @@ uvicorn api.main:app --reload
   - Apple Watch disconnection
   - WiFi unavailability
   - HealthKit permission denials
+  - Cloud sync failures
+  - Authentication errors
+- Implement retry logic for sync operations
+- Queue failed uploads for later sync
 
 ### Testing Requirements
 - Write unit tests for all business logic
