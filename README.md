@@ -97,7 +97,7 @@ flutter install -d [device-id]
 ## Usage
 
 ### Initial Setup
-1. Open Health Genie app on iPhone
+1. Open Galeno Genie app on iPhone
 2. Grant HealthKit permissions when prompted
 3. Ensure Apple Watch is paired and worn
 4. Create account or sign in for cloud sync
