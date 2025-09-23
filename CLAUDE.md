@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project: Health Genie
+## Project: Galeno Genie
 
-Health Genie is a Flutter-based iOS health monitoring application that collects biometric data from Apple Watch, calculates health scores, provides AI-powered health insights, and securely syncs data across devices using HIPAA-compliant cloud storage.
+Galeno Genie is a Flutter-based iOS health monitoring application that collects biometric data from Apple Watch, calculates health scores, provides AI-powered health insights, and securely syncs data across devices using HIPAA-compliant cloud storage.
 
 ## Technology Stack
 
@@ -36,7 +36,7 @@ Health Genie is a Flutter-based iOS health monitoring application that collects 
 ## Project Structure
 
 ```
-health-genie/
+galeno-genie/
 ├── flutter_app/           # Flutter mobile application
 │   ├── lib/
 │   │   ├── config/       # Supabase configuration

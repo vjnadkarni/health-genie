@@ -1,4 +1,4 @@
-# Health Genie Build Status
+# Galeno Genie Build Status
 
 ## Completed Tasks ✅
 1. **Device Setup**

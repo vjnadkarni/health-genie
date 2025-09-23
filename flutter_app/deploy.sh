@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Building Health Genie for iPhone 12..."
+echo "Building Galeno Genie for iPhone 12..."
 
 # Build without code signing
 flutter build ios --debug --no-codesign
@@ -13,4 +13,4 @@ codesign --force --deep --sign - build/ios/Debug-iphoneos/Runner.app
 echo "Installing on iPhone 12..."
 xcrun devicectl device install app --device 00008101-001D44303C08801E build/ios/Debug-iphoneos/Runner.app
 
-echo "Done! Check your iPhone 12 for the Health Genie app."
+echo "Done! Check your iPhone 12 for the Galeno Genie app."

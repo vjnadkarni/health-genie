@@ -181,7 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: const Text('Health Genie'),
+        middle: const Text('Galeno Genie'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

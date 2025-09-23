@@ -1,4 +1,4 @@
--- Health Genie Database Setup for Supabase
+-- Galeno Genie Database Setup for Supabase
 -- Run this SQL in your Supabase SQL Editor
 
 -- Create user_profiles table to store user metadata
