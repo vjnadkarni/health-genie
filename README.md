@@ -1,4 +1,4 @@
-# Health Genie
+# Galeno Genie
 
 A comprehensive health monitoring iOS application that integrates with Apple Watch to collect, analyze, and securely sync biometric data across devices with HIPAA-compliant cloud storage.
 
@@ -70,8 +70,8 @@ A comprehensive health monitoring iOS application that integrates with Apple Wat
 ### Setup Steps
 1. Clone the repository:
 ```bash
-git clone https://github.com/vjnadkarni/health-genie.git
-cd health-genie/flutter_app
+git clone https://github.com/vjnadkarni/galeno-genie.git
+cd galeno-genie/flutter_app
 ```
 
 2. Install dependencies:
